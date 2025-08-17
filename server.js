@@ -53,7 +53,7 @@ app.set("trust proxy", 1); // Trust the first proxy
 
 // ----------------- CORS -----------------
 app.use(cors({
-  origin: ["https://admirable-kashata-63932f.netlify.app", "http://localhost:5500"],
+  origin: ["https://sulavtraders.netlify.app", "http://localhost:5500"],
   credentials: true
 }));
 
