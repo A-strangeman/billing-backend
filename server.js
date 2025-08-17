@@ -16,6 +16,7 @@ const __dirname = path.dirname(__filename);
 // Load env from Billing_app/.env (same folder as this file)
 dotenv.config({ path: path.join(__dirname, ".env") });
 
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -35,7 +36,7 @@ const db = mysql.createPool({
 
 app.get("/api/test-db", async (_req, res) => {
   try {
-    const conn = await db.getConnection();
+    const conn = await db.getConnection();git 
     await conn.ping(); 
     conn.release();
     res.json({ ok: true, message: "Cloud Clever DB connected!" });
@@ -48,10 +49,11 @@ app.get("/api/test-db", async (_req, res) => {
 /* ─────────────────────────────────────────────
    Middleware
 ────────────────────────────────────────────── */
+app.set("trust proxy", 1); // Trust the first proxy
 
 // ----------------- CORS -----------------
 app.use(cors({
-  origin: "https://admirable-kashata-63932f.netlify.app",
+  origin: ["https://admirable-kashata-63932f.netlify.app", "http://localhost:5500"],
   credentials: true
 }));
 
@@ -64,13 +66,12 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 1000 * 60 * 60
+    // These settings are critical for cross-site cookies
+    sameSite: "none",
+    secure: true, // Always true for production deployment
+    maxAge: 1000 * 60 * 60 // 1 hour
   }
-
 }));
-
 
 // (optional) serve static files from ./public
 app.use(express.static(path.join(__dirname, "public")));
