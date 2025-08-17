@@ -51,10 +51,11 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: "none",    // important for cross-origin
-    secure: true,        // required if using HTTPS (Netlify + Render are HTTPS)
-    maxAge: 1000 * 60 * 60 // 1 hour
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 1000 * 60 * 60
   }
+
 }));
 
 
@@ -125,6 +126,9 @@ app.post("/api/login", (req, res) => {
   const { email, password } = req.body || {};
   const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
   const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "").trim();
+  console.log("Login attempt:", { email, password });
+  console.log("Expected:", { ADMIN_EMAIL, ADMIN_PASSWORD });
+
 
   if (
     (email || "").trim().toLowerCase() === ADMIN_EMAIL &&
