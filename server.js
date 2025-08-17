@@ -35,10 +35,13 @@ const db = mysql.createPool({
 /* ─────────────────────────────────────────────
    Middleware
 ────────────────────────────────────────────── */
+
+// ----------------- CORS -----------------
 app.use(cors({
-  origin: true,         // in dev, allow any origin that sends credentials
+  origin: "https://admirable-kashata-63932f.netlify.app",
   credentials: true
 }));
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -48,11 +51,12 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: "lax",
-    // secure: true, // enable if serving over HTTPS
+    sameSite: "none",    // important for cross-origin
+    secure: true,        // required if using HTTPS (Netlify + Render are HTTPS)
     maxAge: 1000 * 60 * 60 // 1 hour
   }
 }));
+
 
 // (optional) serve static files from ./public
 app.use(express.static(path.join(__dirname, "public")));
