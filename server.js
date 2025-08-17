@@ -53,7 +53,7 @@ app.set("trust proxy", 1); // Trust the first proxy
 
 // ----------------- CORS -----------------
 app.use(cors({
-  origin: ["https://sulavtraders.netlify.app", "http://localhost:5500"],
+  origin: ["https://sulavtrader.netlify.app", "http://localhost:5500"],
   credentials: true
 }));
 
@@ -138,6 +138,13 @@ app.get("/api/health", async (_req, res) => {
 ────────────────────────────────────────────── */
 app.post("/api/login", (req, res) => {
   const { email, password } = req.body || {};
+  // --- COPY AND PASTE THIS EXACT CODE ---
+  console.log("--- LOGIN ATTEMPT ---");
+  console.log("Received Email:", `'${email}'`);
+  console.log("Expected Email:", `'${process.env.ADMIN_EMAIL}'`);
+  console.log("Received Password:", `'${password}'`);
+  console.log("Expected Password:", `'${process.env.ADMIN_PASSWORD}'`);
+  console.log("-----------------------");
   const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
   const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "").trim();
   console.log("Login attempt:", { email, password });
