@@ -1,4 +1,4 @@
-// server.js - Optimized Version
+// server.js - Deployment Ready Version for Render
 import express from "express";
 import session from "express-session";
 import path from "path";
@@ -6,12 +6,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import mysql from "mysql2/promise";
-import compression from "compression";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 
 /* ─────────────────────────────────────────────
-   Setup & Environment
+   Basic Setup
 ────────────────────────────────────────────── */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,7 +19,7 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 /* ─────────────────────────────────────────────
-   Enhanced MySQL Configuration with Connection Pooling
+   Database Connection - Simple & Reliable
 ────────────────────────────────────────────── */
 const db = mysql.createPool({
   host: process.env.DB_HOST,
@@ -31,217 +28,66 @@ const db = mysql.createPool({
   database: process.env.DB_NAME,
   port: Number(process.env.DB_PORT) || 3306,
   waitForConnections: true,
-  connectionLimit: 15, // Increased from 10
+  connectionLimit: 5,
   queueLimit: 0,
-  // Remove invalid options that cause warnings
-  // acquireTimeout: 60000,  -- Not valid for mysql2
-  // timeout: 60000,         -- Not valid for mysql2  
-  // reconnect: true,        -- Not valid for mysql2
-  charset: 'utf8mb4',
-  timezone: '+00:00',
-  // Valid performance optimizations for mysql2
-  supportBigNumbers: true,
-  bigNumberStrings: true,
-  dateStrings: false,
-  multipleStatements: false
-});
-
-// Health check with connection pooling info
-app.get("/api/test-db", async (_req, res) => {
-  try {
-    const conn = await db.getConnection();
-    await conn.ping(); 
-    conn.release();
-    
-    // Pool status for monitoring
-    const poolStatus = {
-      totalConnections: db.pool._allConnections.length,
-      freeConnections: db.pool._freeConnections.length,
-      acquiringConnections: db.pool._acquiringConnections.length
-    };
-    
-    res.json({ 
-      ok: true, 
-      message: "Cloud Clever DB connected!", 
-      poolStatus 
-    });
-  } catch (err) {
-    console.error("DB test failed:", err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
+  charset: 'utf8mb4'
 });
 
 /* ─────────────────────────────────────────────
-   Enhanced Security & Performance Middleware
+   Middleware - Simple but Effective
 ────────────────────────────────────────────── */
 app.set("trust proxy", 1);
 
-// Security headers
-app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: false // Adjust based on your needs
-}));
-
-// Compression for better performance
-app.use(compression({
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) return false;
-    return compression.filter(req, res);
-  },
-  level: 6,
-  threshold: 1024
-}));
-
-// Rate limiting to prevent abuse
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: { error: "Too many requests, please try again later." },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api/', limiter);
-
-// Stricter rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5, // Only 5 login attempts per 15 minutes
-  message: { error: "Too many login attempts, please try again later." }
-});
-
-// CORS with optimized settings
+// CORS - Liberal settings for troubleshooting
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ["https://sulavtrader.netlify.app"] 
-    : ["https://sulavtrader.netlify.app", "http://localhost:5500", "http://localhost:3000"],
+  origin: true, // Allow all origins during debugging
   credentials: true,
-  optionsSuccessStatus: 200,
-  maxAge: 86400 // Cache preflight for 24 hours
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Optimized body parsing
-app.use(express.json({ 
-  limit: "1mb", // Reduced from 2mb
-  type: ['application/json', 'text/plain']
-}));
-app.use(express.urlencoded({ 
-  extended: true, 
-  limit: "1mb",
-  parameterLimit: 1000
-}));
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-// Session configuration with better performance
 app.use(session({
   secret: process.env.SESSION_SECRET || "supersecretkey",
   resave: false,
   saveUninitialized: false,
-  name: 'billing.sid', // Custom session name
   cookie: {
     httpOnly: true,
-    sameSite: "none",
+    sameSite: process.env.NODE_ENV === 'production' ? "none" : "lax",
     secure: process.env.NODE_ENV === 'production',
-    maxAge: 1000 * 60 * 60 * 2 // Extended to 2 hours
+    maxAge: 1000 * 60 * 60 * 2 // 2 hours
   },
-  rolling: true // Reset expiry on activity
+  rolling: true
 }));
 
-// Static files with caching
-app.use(express.static(path.join(__dirname, "public"), {
-  maxAge: process.env.NODE_ENV === 'production' ? '1d' : '0',
-  etag: true,
-  lastModified: true
-}));
+app.use(express.static(path.join(__dirname, "public")));
 
 /* ─────────────────────────────────────────────
-   Optimized Helper Functions (with caching potential)
+   Helper Functions
 ────────────────────────────────────────────── */
 const requireAuth = (req, res, next) => {
+  console.log("Auth check - Session:", req.session?.userId); // Debug logging
   if (req.session?.userId) return next();
   return res.status(401).json({ success: false, message: "Unauthorized" });
 };
 
-// Memoized JSON operations for better performance
-const jsonCache = new Map();
 const toJSONString = (val) => {
   if (val == null) return "[]";
   if (typeof val === "string") return val;
-  
-  const key = JSON.stringify(val);
-  if (jsonCache.has(key)) return jsonCache.get(key);
-  
-  try { 
-    const result = JSON.stringify(val);
-    if (jsonCache.size > 1000) jsonCache.clear(); // Prevent memory leaks
-    jsonCache.set(key, result);
-    return result;
-  } catch { 
-    return "[]"; 
-  }
+  try { return JSON.stringify(val); } catch { return "[]"; }
 };
 
 const parseItems = (val) => {
   if (!val) return [];
   if (Array.isArray(val)) return val;
   if (typeof val === "object") return val;
-  
-  if (jsonCache.has(val)) return jsonCache.get(val);
-  
-  try { 
-    const result = JSON.parse(val);
-    if (jsonCache.size > 1000) jsonCache.clear();
-    jsonCache.set(val, result);
-    return result;
-  } catch { 
-    return []; 
-  }
+  try { return JSON.parse(val); } catch { return []; }
 };
 
-// Optimized number conversion
-const toNum = (v) => {
-  if (typeof v === 'number') return isFinite(v) ? v : 0;
-  const num = Number(v);
-  return isFinite(num) ? num : 0;
-};
+const toNum = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 
-// Pre-compiled query for better performance
-const QUERIES = {
-  CREATE_DELETED_BILLS_TABLE: `
-    CREATE TABLE IF NOT EXISTS deleted_bills (
-      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-      original_bill_id INT NULL,
-      estimate_no VARCHAR(50) NOT NULL,
-      customer_name VARCHAR(255) NOT NULL,
-      customer_phone VARCHAR(50),
-      bill_date DATE NULL,
-      items JSON NULL,
-      sub_total DECIMAL(10,2) DEFAULT 0.00,
-      discount DECIMAL(10,2) DEFAULT 0.00,
-      grand_total DECIMAL(10,2) DEFAULT 0.00,
-      received DECIMAL(10,2) DEFAULT 0.00,
-      balance DECIMAL(10,2) DEFAULT 0.00,
-      amount_words TEXT,
-      user_id VARCHAR(100) NOT NULL,
-      deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_user_estimate (user_id, estimate_no),
-      INDEX idx_deleted_at (deleted_at)
-    )
-  `,
-  
-  // Pre-compiled prepared statements
-  SELECT_BILL_BY_ESTIMATE: "SELECT * FROM bills WHERE estimate_no = ? AND user_id = ? LIMIT 1",
-  SELECT_USER_BILLS: "SELECT * FROM bills WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT ?",
-  INSERT_BILL: `INSERT INTO bills
-    (estimate_no, customer_name, customer_phone, bill_date, items,
-     sub_total, discount, grand_total, received, balance, amount_words, user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  UPDATE_BILL: `UPDATE bills SET
-    customer_name=?, customer_phone=?, bill_date=?, items=?,
-    sub_total=?, discount=?, grand_total=?, received=?, balance=?, amount_words=?
-    WHERE id=?`,
-  SELECT_DELETED_BILLS: "SELECT * FROM deleted_bills WHERE user_id = ? ORDER BY deleted_at DESC LIMIT ?"
-};
-
-// Optimized bill data builder with object pooling concept
 const buildBillDataRow = (row) => {
   return JSON.stringify({
     estimateNo: row.estimate_no ?? "",
@@ -259,116 +105,120 @@ const buildBillDataRow = (row) => {
 };
 
 /* ─────────────────────────────────────────────
-   Enhanced Health Check
+   Health Checks & Debug Endpoints
 ────────────────────────────────────────────── */
+app.get("/", (_req, res) => {
+  res.json({
+    message: "✅ Billing System API is running",
+    version: "1.0.0",
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      "POST /api/login",
+      "GET /api/me", 
+      "GET /api/get-bills",
+      "GET /api/bills/:estimateNo",
+      "POST /api/save-bill",
+      "PATCH /api/update-bill",
+      "DELETE /api/delete-bill",
+      "GET /api/get-deleted-bills",
+      "POST /api/restore-bill",
+      "DELETE /api/permanent-delete-bill"
+    ]
+  });
+});
+
+app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
 app.get("/api/health", async (_req, res) => {
-  const startTime = Date.now();
   try {
     const conn = await db.getConnection();
     await conn.ping();
     conn.release();
-    
-    const responseTime = Date.now() - startTime;
-    res.json({ 
-      ok: true, 
-      responseTime: `${responseTime}ms`,
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime()
-    });
+    res.json({ ok: true, db: "connected", timestamp: new Date().toISOString() });
   } catch (e) {
-    res.status(500).json({ 
-      ok: false, 
-      error: e.message,
-      responseTime: `${Date.now() - startTime}ms`
-    });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/api/test-db", async (_req, res) => {
+  try {
+    const conn = await db.getConnection();
+    await conn.ping();
+    conn.release();
+    res.json({ ok: true, message: "Database connected successfully!" });
+  } catch (err) {
+    console.error("DB test failed:", err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 /* ─────────────────────────────────────────────
-   Optimized Authentication
+   Authentication
 ────────────────────────────────────────────── */
-app.post("/api/login", authLimiter, (req, res) => {
-  const { email, password } = req.body || {};
+app.post("/api/login", async (req, res) => {
+  console.log("Login attempt:", req.body); // Debug log
   
-  // Early validation
-  if (!email || !password) {
-    return res.status(400).json({ 
-      success: false, 
-      message: "Email and password are required" 
-    });
-  }
-
+  const { email, password } = req.body || {};
   const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
   const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "").trim();
 
-  // Secure comparison without detailed logging in production
-  if (process.env.NODE_ENV !== 'production') {
-    console.log("Login attempt for:", email);
-  }
+  console.log("Comparing:", {
+    received: { email, password },
+    expected: { ADMIN_EMAIL, ADMIN_PASSWORD }
+  });
 
   if (
-    email.trim().toLowerCase() === ADMIN_EMAIL &&
-    password.trim() === ADMIN_PASSWORD
+    (email || "").trim().toLowerCase() === ADMIN_EMAIL &&
+    (password || "").trim() === ADMIN_PASSWORD
   ) {
     req.session.userId = "admin";
-    req.session.loginTime = Date.now();
+    console.log("Login successful, session:", req.session.userId);
     return res.json({ success: true, userId: "admin" });
   }
   
+  console.log("Login failed");
   return res.status(401).json({ success: false, message: "Invalid credentials" });
 });
 
 app.post("/api/logout", (req, res) => {
-  req.session.destroy((err) => {
-    if (err) console.error("Session destroy error:", err);
-    res.json({ success: true });
-  });
+  req.session.destroy(() => res.json({ success: true }));
 });
 
 app.get("/api/me", (req, res) => {
-  if (!req.session?.userId) {
-    return res.status(401).json({ authenticated: false });
-  }
-  res.json({ 
-    authenticated: true, 
-    userId: req.session.userId,
-    loginTime: req.session.loginTime
-  });
+  console.log("Auth check - session exists:", !!req.session?.userId);
+  if (!req.session?.userId) return res.status(401).json({ authenticated: false });
+  res.json({ authenticated: true, userId: req.session.userId });
 });
 
 /* ─────────────────────────────────────────────
-   Optimized Bills CRUD Operations
+   Bills CRUD - Core Functionality
 ────────────────────────────────────────────── */
 
-// Enhanced input validation
-const validateBillInput = (body) => {
-  const errors = [];
-  if (!body.estimateNo?.toString().trim()) errors.push("Estimate number is required");
-  if (!body.customerName?.toString().trim()) errors.push("Customer name is required");
-  return errors;
-};
-
+// Create or Update Bill
 app.post("/api/save-bill", requireAuth, async (req, res) => {
-  const errors = validateBillInput(req.body);
-  if (errors.length > 0) {
-    return res.status(400).json({ success: false, message: errors.join(", ") });
+  console.log("Save bill request:", req.body); // Debug
+  
+  const b = req.body || {};
+  const userId = req.session.userId;
+
+  if (!b.estimateNo || !b.customerName) {
+    return res.status(400).json({ 
+      success: false, 
+      message: "estimateNo and customerName are required" 
+    });
   }
 
-  const b = req.body;
-  const userId = req.session.userId;
-  const itemsStr = toJSONString(b.items);
-  const billDate = b.billDate || null;
-
   try {
-    const [existing] = await db.query(QUERIES.SELECT_BILL_BY_ESTIMATE, [
-      String(b.estimateNo), userId
-    ]);
+    const [existing] = await db.query(
+      "SELECT id FROM bills WHERE estimate_no = ? AND user_id = ?",
+      [String(b.estimateNo), userId]
+    );
 
     const billData = [
       b.customerName || "",
       b.customerPhone || "",
-      billDate,
-      itemsStr,
+      b.billDate || null,
+      toJSONString(b.items),
       toNum(b.subTotal),
       toNum(b.discount),
       toNum(b.grandTotal),
@@ -378,98 +228,104 @@ app.post("/api/save-bill", requireAuth, async (req, res) => {
     ];
 
     if (existing.length > 0) {
-      await db.query(QUERIES.UPDATE_BILL, [...billData, existing[0].id]);
-      return res.json({ success: true, action: "updated", id: existing[0].id });
+      await db.query(
+        `UPDATE bills SET
+         customer_name=?, customer_phone=?, bill_date=?, items=?,
+         sub_total=?, discount=?, grand_total=?, received=?, balance=?, amount_words=?
+         WHERE id=?`,
+        [...billData, existing[0].id]
+      );
+      console.log("Bill updated:", existing[0].id);
+      return res.json({ success: true, action: "updated" });
     } else {
-      const [result] = await db.query(QUERIES.INSERT_BILL, [
-        String(b.estimateNo),
-        ...billData,
-        userId
-      ]);
-      return res.json({ success: true, action: "inserted", id: result.insertId });
+      const [result] = await db.query(
+        `INSERT INTO bills
+         (estimate_no, customer_name, customer_phone, bill_date, items,
+          sub_total, discount, grand_total, received, balance, amount_words, user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [String(b.estimateNo), ...billData, userId]
+      );
+      console.log("Bill created:", result.insertId);
+      return res.json({ success: true, action: "inserted" });
     }
   } catch (err) {
     console.error("Save bill error:", err);
-    return res.status(500).json({ success: false, message: "Database error" });
+    return res.status(500).json({ success: false, message: "Database error: " + err.message });
   }
 });
 
-// Paginated bill retrieval
+// Get All Bills
 app.get("/api/get-bills", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100); // Max 100 records
-    const offset = parseInt(req.query.offset) || 0;
-
+    console.log("Fetching bills for user:", userId);
+    
     const [rows] = await db.query(
-      QUERIES.SELECT_USER_BILLS.replace('LIMIT ?', 'LIMIT ? OFFSET ?'),
-      [userId, limit, offset]
+      "SELECT * FROM bills WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC",
+      [userId]
     );
 
-    // Batch process for better performance
+    console.log("Found bills:", rows.length);
+    
     const bills = rows.map(r => ({
       ...r,
       billData: buildBillDataRow(r)
     }));
-
-    res.json({
-      data: bills,
-      pagination: {
-        limit,
-        offset,
-        count: bills.length
-      }
-    });
+    
+    res.json(bills);
   } catch (err) {
     console.error("Error fetching bills:", err);
-    res.status(500).json({ error: "Failed to fetch bills" });
+    res.status(500).json({ error: "Failed to fetch bills: " + err.message });
   }
 });
 
-// Optimized single bill retrieval
+// Get Single Bill
 app.get("/api/bills/:estimateNo", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
     const { estimateNo } = req.params;
+    
+    console.log("Fetching bill:", estimateNo, "for user:", userId);
 
-    if (!estimateNo) {
-      return res.status(400).json({ success: false, message: "Estimate number required" });
-    }
-
-    const [rows] = await db.query(QUERIES.SELECT_BILL_BY_ESTIMATE, [
-      String(estimateNo), userId
-    ]);
+    const [rows] = await db.query(
+      "SELECT * FROM bills WHERE estimate_no = ? AND user_id = ? LIMIT 1",
+      [String(estimateNo), userId]
+    );
 
     if (!rows.length) {
+      console.log("Bill not found");
       return res.status(404).json({ success: false, message: "Bill not found" });
     }
 
     const bill = rows[0];
     bill.billData = buildBillDataRow(bill);
+    console.log("Bill found and returned");
     res.json(bill);
   } catch (err) {
     console.error("Error fetching bill:", err);
-    res.status(500).json({ error: "Failed to fetch bill" });
+    res.status(500).json({ error: "Failed to fetch bill: " + err.message });
   }
 });
 
-// Enhanced partial update with validation
+// Update Bill
 app.patch("/api/update-bill", requireAuth, async (req, res) => {
-  const { estimateNo, updates } = req.body || {};
+  console.log("Update bill request:", req.body);
   
-  if (!estimateNo || !updates || typeof updates !== 'object') {
+  const { estimateNo, updates } = req.body || {};
+  if (!estimateNo || !updates) {
     return res.status(400).json({ 
       success: false, 
-      message: "Missing estimateNo or valid updates object" 
+      message: "Missing estimateNo or updates" 
     });
   }
-
+  
   const userId = req.session.userId;
 
   try {
-    const [rows] = await db.query(QUERIES.SELECT_BILL_BY_ESTIMATE, [
-      String(estimateNo), userId
-    ]);
+    const [rows] = await db.query(
+      "SELECT * FROM bills WHERE estimate_no = ? AND user_id = ? LIMIT 1",
+      [String(estimateNo), userId]
+    );
     
     if (!rows.length) {
       return res.status(404).json({ success: false, message: "Bill not found" });
@@ -492,46 +348,55 @@ app.patch("/api/update-bill", requireAuth, async (req, res) => {
 
     const merged = { ...current, ...updates };
 
-    await db.query(QUERIES.UPDATE_BILL, [
-      merged.customerName || "",
-      merged.customerPhone || "",
-      merged.billDate || null,
-      toJSONString(merged.items),
-      toNum(merged.subTotal),
-      toNum(merged.discount),
-      toNum(merged.grandTotal),
-      toNum(merged.received),
-      toNum(merged.balance),
-      merged.amountWords || "",
-      row.id
-    ]);
+    await db.query(
+      `UPDATE bills SET
+       customer_name=?, customer_phone=?, bill_date=?, items=?,
+       sub_total=?, discount=?, grand_total=?, received=?, balance=?, amount_words=?
+       WHERE id=?`,
+      [
+        merged.customerName || "",
+        merged.customerPhone || "",
+        merged.billDate || null,
+        toJSONString(merged.items),
+        toNum(merged.subTotal),
+        toNum(merged.discount),
+        toNum(merged.grandTotal),
+        toNum(merged.received),
+        toNum(merged.balance),
+        merged.amountWords || "",
+        row.id
+      ]
+    );
 
-    return res.json({ success: true, message: "Bill updated", id: row.id });
+    console.log("Bill updated successfully");
+    return res.json({ success: true, message: "Bill updated." });
   } catch (err) {
     console.error("Update bill error:", err);
-    return res.status(500).json({ success: false, message: "Database error" });
+    return res.status(500).json({ success: false, message: "Database error: " + err.message });
   }
 });
 
 /* ─────────────────────────────────────────────
-   Optimized Soft Delete with Transaction Management
+   Delete Bills (Soft Delete)
 ────────────────────────────────────────────── */
 app.delete("/api/delete-bill", requireAuth, async (req, res) => {
-  const { estimateNo } = req.body || {};
+  console.log("Delete bill request:", req.body);
   
+  const { estimateNo } = req.body || {};
   if (!estimateNo) {
     return res.status(400).json({ success: false, message: "Missing estimateNo" });
   }
-
+  
   const userId = req.session.userId;
   const conn = await db.getConnection();
-
+  
   try {
     await conn.beginTransaction();
 
-    const [rows] = await conn.query(QUERIES.SELECT_BILL_BY_ESTIMATE, [
-      String(estimateNo), userId
-    ]);
+    const [rows] = await conn.query(
+      "SELECT * FROM bills WHERE estimate_no = ? AND user_id = ? LIMIT 1",
+      [String(estimateNo), userId]
+    );
     
     if (!rows.length) {
       await conn.rollback();
@@ -539,6 +404,7 @@ app.delete("/api/delete-bill", requireAuth, async (req, res) => {
     }
     
     const bill = rows[0];
+    console.log("Moving bill to deleted_bills:", bill.id);
 
     // Insert into deleted_bills
     await conn.query(
@@ -563,42 +429,47 @@ app.delete("/api/delete-bill", requireAuth, async (req, res) => {
       ]
     );
 
-    // Delete from bills
     await conn.query("DELETE FROM bills WHERE id = ?", [bill.id]);
 
     await conn.commit();
-    return res.json({ success: true, message: "Bill moved to deleted history", id: bill.id });
+    console.log("Bill successfully moved to deleted_bills");
+    return res.json({ success: true, message: "Bill moved to deleted history." });
   } catch (err) {
     await conn.rollback();
     console.error("Soft delete error:", err);
-    return res.status(500).json({ success: false, message: "Database error" });
+    return res.status(500).json({ success: false, message: "Database error: " + err.message });
   } finally {
     conn.release();
   }
 });
 
 /* ─────────────────────────────────────────────
-   Enhanced Deleted Bills Management
+   Deleted Bills Management
 ────────────────────────────────────────────── */
 app.get("/api/get-deleted-bills", requireAuth, async (req, res) => {
   try {
     const userId = req.session.userId;
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    console.log("Fetching deleted bills for user:", userId);
     
-    const [rows] = await db.query(QUERIES.SELECT_DELETED_BILLS, [userId, limit]);
+    const [rows] = await db.query(
+      "SELECT * FROM deleted_bills WHERE user_id = ? ORDER BY deleted_at DESC",
+      [userId]
+    );
+    
+    console.log("Found deleted bills:", rows.length);
     return res.json(rows);
   } catch (err) {
     console.error("Get deleted bills error:", err);
-    return res.status(500).json({ success: false, message: "Database error" });
+    return res.status(500).json({ success: false, message: "Database error: " + err.message });
   }
 });
 
 app.post("/api/restore-bill", requireAuth, async (req, res) => {
+  console.log("Restore bill request:", req.body);
+  
   const { id } = req.body || {};
-  if (!id) {
-    return res.status(400).json({ success: false, message: "Missing id" });
-  }
-
+  if (!id) return res.status(400).json({ success: false, message: "Missing id" });
+  
   const userId = req.session.userId;
   const conn = await db.getConnection();
 
@@ -616,41 +487,49 @@ app.post("/api/restore-bill", requireAuth, async (req, res) => {
     }
     
     const d = rows[0];
+    console.log("Restoring bill:", d.estimate_no);
 
-    await conn.query(QUERIES.INSERT_BILL, [
-      d.estimate_no,
-      d.customer_name,
-      d.customer_phone,
-      d.bill_date,
-      toJSONString(d.items),
-      d.sub_total,
-      d.discount,
-      d.grand_total,
-      d.received,
-      d.balance,
-      d.amount_words,
-      userId
-    ]);
+    await conn.query(
+      `INSERT INTO bills
+       (estimate_no, customer_name, customer_phone, bill_date, items,
+        sub_total, discount, grand_total, received, balance, amount_words, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        d.estimate_no,
+        d.customer_name,
+        d.customer_phone,
+        d.bill_date,
+        toJSONString(d.items),
+        d.sub_total,
+        d.discount,
+        d.grand_total,
+        d.received,
+        d.balance,
+        d.amount_words,
+        userId
+      ]
+    );
 
     await conn.query("DELETE FROM deleted_bills WHERE id = ?", [id]);
 
     await conn.commit();
-    return res.json({ success: true, message: "Bill restored successfully" });
+    console.log("Bill restored successfully");
+    return res.json({ success: true, message: "Bill restored." });
   } catch (err) {
     await conn.rollback();
     console.error("Restore bill error:", err);
-    return res.status(500).json({ success: false, message: "Database error" });
+    return res.status(500).json({ success: false, message: "Database error: " + err.message });
   } finally {
     conn.release();
   }
 });
 
 app.delete("/api/permanent-delete-bill", requireAuth, async (req, res) => {
+  console.log("Permanent delete request:", req.body);
+  
   const { id } = req.body || {};
-  if (!id) {
-    return res.status(400).json({ success: false, message: "Missing id" });
-  }
-
+  if (!id) return res.status(400).json({ success: false, message: "Missing id" });
+  
   const userId = req.session.userId;
 
   try {
@@ -663,67 +542,87 @@ app.delete("/api/permanent-delete-bill", requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: "Record not found" });
     }
     
-    return res.json({ success: true, message: "Permanently deleted" });
+    console.log("Bill permanently deleted");
+    return res.json({ success: true, message: "Permanently deleted." });
   } catch (err) {
     console.error("Permanent delete error:", err);
-    return res.status(500).json({ success: false, message: "Database error" });
+    return res.status(500).json({ success: false, message: "Database error: " + err.message });
   }
 });
 
 /* ─────────────────────────────────────────────
-   Application Bootstrap & Startup
+   Database Initialization
 ────────────────────────────────────────────── */
-app.get("/", (_req, res) => {
-  res.json({
-    message: "Billing System API is running 🚀",
-    version: "2.0.0",
-    timestamp: new Date().toISOString()
-  });
-});
-
 async function initDb() {
   try {
-    await db.query(QUERIES.CREATE_DELETED_BILLS_TABLE);
-    
-    // Create indexes for better performance if they don't exist
     await db.query(`
-      CREATE INDEX IF NOT EXISTS idx_bills_user_estimate ON bills(user_id, estimate_no)
-    `).catch(() => {}); // Ignore if already exists
-    
-    await db.query(`
-      CREATE INDEX IF NOT EXISTS idx_bills_updated_at ON bills(updated_at DESC)
-    `).catch(() => {});
-    
-    console.log("✅ Database tables and indexes initialized");
+      CREATE TABLE IF NOT EXISTS deleted_bills (
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        original_bill_id INT NULL,
+        estimate_no VARCHAR(50),
+        customer_name VARCHAR(255),
+        customer_phone VARCHAR(50),
+        bill_date DATE NULL,
+        items JSON NULL,
+        sub_total DECIMAL(10,2) DEFAULT 0.00,
+        discount DECIMAL(10,2) DEFAULT 0.00,
+        grand_total DECIMAL(10,2) DEFAULT 0.00,
+        received DECIMAL(10,2) DEFAULT 0.00,
+        balance DECIMAL(10,2) DEFAULT 0.00,
+        amount_words TEXT,
+        user_id VARCHAR(100),
+        deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log("✅ Database tables initialized");
   } catch (error) {
-    console.error("❌ Database initialization failed:", error);
-    throw error;
+    console.error("❌ Database initialization error:", error);
   }
 }
 
-// Graceful shutdown handling
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  await db.end();
-  process.exit(0);
+/* ─────────────────────────────────────────────
+   Error Handling & Startup
+────────────────────────────────────────────── */
+
+// Catch all 404s
+app.use("*", (req, res) => {
+  console.log("404 - Route not found:", req.method, req.originalUrl);
+  res.status(404).json({ error: "Route not found", path: req.originalUrl });
 });
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully');
-  await db.end();
-  process.exit(0);
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("Global error:", err);
+  res.status(500).json({ error: "Internal server error", message: err.message });
 });
 
+// Graceful shutdown
+const gracefulShutdown = async (signal) => {
+  console.log(`${signal} received, shutting down gracefully`);
+  try {
+    await db.end();
+    console.log('Database connections closed');
+  } catch (error) {
+    console.error('Error closing database:', error);
+  }
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Start server
 app.listen(PORT, async () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🌐 CORS: Liberal (allowing all origins for debugging)`);
+  
   try {
     const conn = await db.getConnection();
     conn.release();
+    console.log("✅ Database connection established");
     await initDb();
-    console.log("✅ Database connection OK and tables ready");
-    console.log(`🚀 Server running at http://localhost:${PORT}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   } catch (e) {
-    console.error("❌ Startup failed:", e.message);
-    process.exit(1);
+    console.error("⚠️ Database connection failed:", e.message);
   }
 });
